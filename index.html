@@ -1,0 +1,1082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>100 Planet Subway Runner</title>
+
+<style>
+body{
+    margin:0;
+    overflow:hidden;
+    background:black;
+    font-family:Arial;
+}
+
+canvas{
+    display:block;
+}
+
+#score{
+    position:absolute;
+    top:10px;
+    left:10px;
+    color:white;
+    font-size:28px;
+    z-index:10;
+}
+
+#theme{
+    position:absolute;
+    top:50px;
+    left:10px;
+    color:cyan;
+    font-size:22px;
+    z-index:10;
+}
+
+#power{
+    position:absolute;
+    top:90px;
+    left:10px;
+    color:yellow;
+    font-size:22px;
+    z-index:10;
+}
+
+#gameOver{
+    position:absolute;
+    top:40%;
+    width:100%;
+    text-align:center;
+    color:white;
+    font-size:60px;
+    display:none;
+    z-index:10;
+}
+
+button{
+    padding:15px 30px;
+    font-size:24px;
+    border:none;
+    border-radius:10px;
+    background:orange;
+    color:white;
+}
+</style>
+</head>
+
+<body>
+
+<div id="score">Score: 0</div>
+<div id="theme">🪐 Planet 1</div>
+<div id="power">Power: None</div>
+
+<div id="gameOver">
+GAME OVER<br><br>
+<button onclick="location.reload()">Restart</button>
+</div>
+
+<script type="module">
+
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160/build/three.module.js";
+
+//////////////////////////////////////////////////////
+// SCENE
+//////////////////////////////////////////////////////
+
+const scene = new THREE.Scene();
+
+scene.background = new THREE.Color(0x000814);
+
+scene.fog = new THREE.Fog(
+0x000814,
+20,
+180
+);
+
+//////////////////////////////////////////////////////
+// CAMERA
+//////////////////////////////////////////////////////
+
+const camera = new THREE.PerspectiveCamera(
+75,
+window.innerWidth/window.innerHeight,
+0.1,
+1000
+);
+
+camera.position.set(0,4,10);
+
+//////////////////////////////////////////////////////
+// RENDERER
+//////////////////////////////////////////////////////
+
+const renderer = new THREE.WebGLRenderer({
+antialias:true
+});
+
+renderer.setSize(
+window.innerWidth,
+window.innerHeight
+);
+
+document.body.appendChild(renderer.domElement);
+
+//////////////////////////////////////////////////////
+// LIGHTS
+//////////////////////////////////////////////////////
+
+const hemi = new THREE.HemisphereLight(
+0xffffff,
+0x444444,
+2
+);
+
+scene.add(hemi);
+
+const dir = new THREE.DirectionalLight(
+0xffffff,
+2
+);
+
+dir.position.set(5,10,7);
+
+scene.add(dir);
+
+//////////////////////////////////////////////////////
+// ROAD
+//////////////////////////////////////////////////////
+
+const road = new THREE.Mesh(
+
+new THREE.BoxGeometry(12,1,500),
+
+new THREE.MeshStandardMaterial({
+color:0x222222
+})
+
+);
+
+road.position.z = -220;
+
+scene.add(road);
+
+//////////////////////////////////////////////////////
+// TRACK LINES
+//////////////////////////////////////////////////////
+
+for(let i=0;i<150;i++){
+
+const line1 = new THREE.Mesh(
+
+new THREE.BoxGeometry(0.2,0.05,2),
+
+new THREE.MeshBasicMaterial({
+color:0xffffff
+})
+
+);
+
+line1.position.set(
+-2,
+0.6,
+-i*4
+);
+
+scene.add(line1);
+
+const line2 = line1.clone();
+
+line2.position.x = 2;
+
+scene.add(line2);
+}
+
+//////////////////////////////////////////////////////
+// STARS
+//////////////////////////////////////////////////////
+
+const starGeo =
+new THREE.BufferGeometry();
+
+const starArray = [];
+
+for(let i=0;i<6000;i++){
+
+starArray.push(
+Math.random()*800 - 400,
+Math.random()*300,
+Math.random()*800 - 400
+);
+}
+
+starGeo.setAttribute(
+'position',
+new THREE.Float32BufferAttribute(
+starArray,
+3
+)
+);
+
+const starMat =
+new THREE.PointsMaterial({
+color:0xffffff,
+size:0.4
+});
+
+const stars =
+new THREE.Points(
+starGeo,
+starMat
+);
+
+scene.add(stars);
+
+//////////////////////////////////////////////////////
+// PLAYER
+//////////////////////////////////////////////////////
+
+const player = new THREE.Group();
+
+const body = new THREE.Mesh(
+
+new THREE.BoxGeometry(1,1.5,1),
+
+new THREE.MeshStandardMaterial({
+color:0xff5500
+})
+
+);
+
+player.add(body);
+
+const head = new THREE.Mesh(
+
+new THREE.SphereGeometry(
+0.4,
+32,
+32
+),
+
+new THREE.MeshStandardMaterial({
+color:0xffcc99
+})
+
+);
+
+head.position.y = 1.2;
+
+player.add(head);
+
+player.position.set(0,1,5);
+
+scene.add(player);
+
+//////////////////////////////////////////////////////
+// VARIABLES
+//////////////////////////////////////////////////////
+
+const lanes = [-4,0,4];
+
+let currentLane = 1;
+
+let velocityY = 0;
+
+let isJumping = false;
+
+let speed = 0.8;
+
+let score = 0;
+
+let gameRunning = true;
+
+let currentTheme = -1;
+
+//////////////////////////////////////////////////////
+// POWERUPS
+//////////////////////////////////////////////////////
+
+const powerUps = [];
+
+let shieldActive = false;
+let magnetActive = false;
+let boostActive = false;
+
+//////////////////////////////////////////////////////
+// PLANETS
+//////////////////////////////////////////////////////
+
+const planetNames = [];
+
+for(let i=1;i<=100;i++){
+
+planetNames.push(
+"Planet " + i
+);
+}
+
+const worldObjects = [];
+
+function clearWorld(){
+
+for(let i=0;i<worldObjects.length;i++){
+
+scene.remove(worldObjects[i]);
+}
+
+worldObjects.length = 0;
+}
+
+//////////////////////////////////////////////////////
+// CREATE PLANET
+//////////////////////////////////////////////////////
+
+function createPlanet(index){
+
+clearWorld();
+
+const hue =
+(index * 37) % 360;
+
+scene.background =
+new THREE.Color(
+`hsl(${hue},70%,12%)`
+);
+
+scene.fog.color.set(
+`hsl(${hue},70%,12%)`
+);
+
+road.material.color.set(
+`hsl(${(hue+40)%360},70%,30%)`
+);
+
+document.getElementById(
+"theme"
+).innerHTML =
+`🪐 ${planetNames[index]}`;
+
+const style = index % 10;
+
+for(let i=0;i<120;i++){
+
+const obj = new THREE.Mesh(
+
+new THREE.BoxGeometry(
+2 + Math.random()*4,
+4 + Math.random()*20,
+2 + Math.random()*4
+),
+
+new THREE.MeshStandardMaterial({
+color:new THREE.Color(
+`hsl(${hue},80%,50%)`
+),
+emissive:new THREE.Color(
+`hsl(${hue},80%,15%)`
+)
+})
+
+);
+
+const side =
+Math.random()>0.5 ? -15 : 15;
+
+obj.position.set(
+side,
+obj.geometry.parameters.height/2,
+-i*8
+);
+
+scene.add(obj);
+
+worldObjects.push(obj);
+}
+}
+
+createPlanet(0);
+
+//////////////////////////////////////////////////////
+// TRAINS
+//////////////////////////////////////////////////////
+
+const obstacles = [];
+
+function createObstacle(){
+
+const train = new THREE.Group();
+
+const trainColor =
+new THREE.Color(
+Math.random(),
+Math.random(),
+Math.random()
+);
+
+const trainBody = new THREE.Mesh(
+
+new THREE.BoxGeometry(2.8,2.8,10),
+
+new THREE.MeshStandardMaterial({
+color:trainColor,
+metalness:0.4,
+roughness:0.5
+})
+
+);
+
+trainBody.position.y = 2;
+
+train.add(trainBody);
+
+const front = new THREE.Mesh(
+
+new THREE.BoxGeometry(2.7,2.2,2),
+
+new THREE.MeshStandardMaterial({
+color:trainColor
+})
+
+);
+
+front.position.set(0,2.2,5.5);
+
+train.add(front);
+
+for(let i=-1;i<=1;i++){
+
+const glass = new THREE.Mesh(
+
+new THREE.BoxGeometry(0.6,0.5,0.05),
+
+new THREE.MeshStandardMaterial({
+color:0x88ccff,
+emissive:0x2266aa
+})
+
+);
+
+glass.position.set(i*0.8,2.4,6.02);
+
+train.add(glass);
+}
+
+for(let i=0;i<4;i++){
+
+const side1 = new THREE.Mesh(
+
+new THREE.BoxGeometry(0.05,0.5,1),
+
+new THREE.MeshStandardMaterial({
+color:0xaaddff,
+emissive:0x224466
+})
+
+);
+
+side1.position.set(-1.42,2.3,2.5-i*2);
+
+train.add(side1);
+
+const side2 = side1.clone();
+
+side2.position.x = 1.42;
+
+train.add(side2);
+}
+
+for(let i=-1;i<=1;i+=2){
+
+const light = new THREE.Mesh(
+
+new THREE.SphereGeometry(0.18,16,16),
+
+new THREE.MeshStandardMaterial({
+color:0xffffaa,
+emissive:0xffffaa
+})
+
+);
+
+light.position.set(i*0.7,1.9,6.2);
+
+train.add(light);
+}
+
+const roof = new THREE.Mesh(
+
+new THREE.BoxGeometry(2.4,0.3,9),
+
+new THREE.MeshStandardMaterial({
+color:0x444444
+})
+
+);
+
+roof.position.set(0,3.55,0);
+
+train.add(roof);
+
+for(let side=-1;side<=1;side+=2){
+
+for(let z=-3.5;z<=3.5;z+=2.5){
+
+const wheel = new THREE.Mesh(
+
+new THREE.CylinderGeometry(0.45,0.45,0.4,20),
+
+new THREE.MeshStandardMaterial({
+color:0x111111
+})
+
+);
+
+wheel.rotation.z = Math.PI/2;
+
+wheel.position.set(side*1.45,0.7,z);
+
+train.add(wheel);
+}
+}
+
+const lane =
+Math.floor(Math.random()*3);
+
+train.position.set(
+lanes[lane],
+0,
+-120
+);
+
+scene.add(train);
+
+obstacles.push(train);
+}
+
+setInterval(()=>{
+
+if(gameRunning){
+
+createObstacle();
+}
+
+},1000);
+
+//////////////////////////////////////////////////////
+// COINS
+//////////////////////////////////////////////////////
+
+const coins = [];
+
+function createCoin(){
+
+const coin =
+new THREE.Mesh(
+
+new THREE.TorusGeometry(
+0.4,
+0.15,
+16,
+100
+),
+
+new THREE.MeshStandardMaterial({
+color:0xffd700,
+emissive:0xaa8800
+})
+
+);
+
+coin.rotation.x = Math.PI/2;
+
+const lane =
+Math.floor(Math.random()*3);
+
+coin.position.set(
+lanes[lane],
+1.5,
+-120
+);
+
+scene.add(coin);
+
+coins.push(coin);
+}
+
+setInterval(()=>{
+
+if(gameRunning){
+
+createCoin();
+}
+
+},600);
+
+//////////////////////////////////////////////////////
+// CREATE POWERUP
+//////////////////////////////////////////////////////
+
+function createPowerUp(){
+
+const types = [
+"shield",
+"magnet",
+"boost"
+];
+
+const type =
+types[
+Math.floor(Math.random()*types.length)
+];
+
+let color = 0x00ffff;
+
+if(type === "magnet")
+color = 0xff00ff;
+
+if(type === "boost")
+color = 0xffff00;
+
+const power =
+new THREE.Mesh(
+
+new THREE.OctahedronGeometry(0.7),
+
+new THREE.MeshStandardMaterial({
+color:color,
+emissive:color
+})
+
+);
+
+power.userData.type = type;
+
+const lane =
+Math.floor(Math.random()*3);
+
+power.position.set(
+lanes[lane],
+2,
+-120
+);
+
+scene.add(power);
+
+powerUps.push(power);
+}
+
+setInterval(()=>{
+
+if(gameRunning){
+
+createPowerUp();
+}
+
+},5000);
+
+//////////////////////////////////////////////////////
+// CONTROLS
+//////////////////////////////////////////////////////
+
+document.addEventListener(
+"keydown",
+(e)=>{
+
+if(e.key==="ArrowLeft"){
+
+currentLane--;
+
+if(currentLane<0)
+currentLane=0;
+}
+
+if(e.key==="ArrowRight"){
+
+currentLane++;
+
+if(currentLane>2)
+currentLane=2;
+}
+
+if(e.key==="ArrowUp"){
+
+if(!isJumping){
+
+velocityY = 0.28;
+
+isJumping = true;
+}
+}
+});
+
+//////////////////////////////////////////////////////
+// TOUCH
+//////////////////////////////////////////////////////
+
+window.addEventListener(
+"touchstart",
+(e)=>{
+
+const x =
+e.touches[0].clientX;
+
+if(x < innerWidth/3){
+
+currentLane--;
+
+if(currentLane<0)
+currentLane=0;
+}
+
+else if(x > innerWidth*2/3){
+
+currentLane++;
+
+if(currentLane>2)
+currentLane=2;
+}
+
+else{
+
+if(!isJumping){
+
+velocityY = 0.28;
+
+isJumping = true;
+}
+}
+});
+
+//////////////////////////////////////////////////////
+// GAME OVER
+//////////////////////////////////////////////////////
+
+function gameOver(){
+
+gameRunning = false;
+
+document.getElementById(
+"gameOver"
+).style.display = "block";
+}
+
+//////////////////////////////////////////////////////
+// ANIMATE
+//////////////////////////////////////////////////////
+
+function animate(){
+
+requestAnimationFrame(animate);
+
+if(!gameRunning) return;
+
+player.position.x +=
+(lanes[currentLane]
+- player.position.x)*0.2;
+
+player.position.y += velocityY;
+
+velocityY -= 0.015;
+
+if(player.position.y <=1){
+
+player.position.y = 1;
+
+velocityY = 0;
+
+isJumping = false;
+}
+
+//////////////////////////////////////////////////////
+// TRAINS
+//////////////////////////////////////////////////////
+
+for(let i=0;i<obstacles.length;i++){
+
+const o = obstacles[i];
+
+o.position.z += speed;
+
+if(o.position.z >20){
+
+scene.remove(o);
+
+obstacles.splice(i,1);
+
+i--;
+
+continue;
+}
+
+const dx =
+Math.abs(
+player.position.x
+- o.position.x
+);
+
+const dz =
+Math.abs(
+player.position.z
+- o.position.z
+);
+
+if(dx <1.5 && dz <4){
+
+if(!shieldActive){
+
+gameOver();
+
+}else{
+
+scene.remove(o);
+
+obstacles.splice(i,1);
+
+i--;
+}
+}
+}
+
+//////////////////////////////////////////////////////
+// COINS
+//////////////////////////////////////////////////////
+
+for(let i=0;i<coins.length;i++){
+
+const c = coins[i];
+
+c.rotation.z += 0.1;
+
+c.position.z += speed;
+
+if(magnetActive){
+
+c.position.x +=
+(player.position.x - c.position.x)*0.05;
+}
+
+if(c.position.z >15){
+
+scene.remove(c);
+
+coins.splice(i,1);
+
+i--;
+
+continue;
+}
+
+const dx =
+Math.abs(
+player.position.x
+- c.position.x
+);
+
+const dz =
+Math.abs(
+player.position.z
+- c.position.z
+);
+
+if(dx <1 && dz <1){
+
+score += 10;
+
+document.getElementById(
+"score"
+).innerHTML =
+"Score: " + score;
+
+scene.remove(c);
+
+coins.splice(i,1);
+
+i--;
+}
+}
+
+//////////////////////////////////////////////////////
+// POWERUPS
+//////////////////////////////////////////////////////
+
+for(let i=0;i<powerUps.length;i++){
+
+const p = powerUps[i];
+
+p.rotation.y += 0.05;
+
+p.position.z += speed;
+
+if(p.position.z >20){
+
+scene.remove(p);
+
+powerUps.splice(i,1);
+
+i--;
+
+continue;
+}
+
+const dx =
+Math.abs(
+player.position.x
+- p.position.x
+);
+
+const dz =
+Math.abs(
+player.position.z
+- p.position.z
+);
+
+if(dx <1 && dz <1){
+
+const type =
+p.userData.type;
+
+if(type === "shield"){
+
+shieldActive = true;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: Shield 🛡";
+
+setTimeout(()=>{
+
+shieldActive = false;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: None";
+
+},7000);
+}
+
+if(type === "magnet"){
+
+magnetActive = true;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: Magnet 🧲";
+
+setTimeout(()=>{
+
+magnetActive = false;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: None";
+
+},7000);
+}
+
+if(type === "boost"){
+
+boostActive = true;
+
+speed += 0.5;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: Boost ⚡";
+
+setTimeout(()=>{
+
+boostActive = false;
+
+speed -= 0.5;
+
+document.getElementById(
+"power"
+).innerHTML =
+"Power: None";
+
+},5000);
+}
+
+scene.remove(p);
+
+powerUps.splice(i,1);
+
+i--;
+}
+}
+
+//////////////////////////////////////////////////////
+// PLANET CHANGE
+//////////////////////////////////////////////////////
+
+const planetIndex =
+Math.min(
+Math.floor(score / 20),
+99
+);
+
+if(currentTheme !== planetIndex){
+
+currentTheme = planetIndex;
+
+createPlanet(planetIndex);
+}
+
+//////////////////////////////////////////////////////
+// SPEED
+//////////////////////////////////////////////////////
+
+speed += 0.00005;
+
+//////////////////////////////////////////////////////
+// CAMERA
+//////////////////////////////////////////////////////
+
+camera.position.x +=
+(player.position.x
+- camera.position.x)*0.05;
+
+camera.lookAt(
+player.position.x,
+1,
+-20
+);
+
+renderer.render(
+scene,
+camera
+);
+}
+
+animate();
+
+//////////////////////////////////////////////////////
+// RESIZE
+//////////////////////////////////////////////////////
+
+window.addEventListener(
+"resize",
+()=>{
+
+camera.aspect =
+window.innerWidth/
+window.innerHeight;
+
+camera.updateProjectionMatrix();
+
+renderer.setSize(
+window.innerWidth,
+window.innerHeight
+);
+});
+
+</script>
+
+</body>
+</html>
